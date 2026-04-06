@@ -123,15 +123,17 @@ classdef DataLoader < handle
             mainRatio = 0.8 + rand(N, 1) * 0.2;
             mainCrops = zeros(N, obj.imageSize(1), obj.imageSize(2), 3);
             for i = 1:N
-                mainCrops(i,:,:,:) = obj.randomCrop(images(i,:,:,:), mainRatio(i));
+                singleImage = squeeze(images(i,:,:,:));
+                mainCrops(i,:,:,:) = obj.randomCrop(singleImage, mainRatio(i));
             end
             
             % Multi-views: lower crop ratios (0.1-1.0)
             multiCrops = zeros(N, K, obj.imageSize(1), obj.imageSize(2), 3);
             for i = 1:N
+                singleImage = squeeze(images(i,:,:,:));
                 for k = 1:K
                     ratio = obj.cropRatioRange(1) + rand * (obj.cropRatioRange(2) - obj.cropRatioRange(1));
-                    crop = obj.randomCrop(images(i,:,:,:), ratio);
+                    crop = obj.randomCrop(singleImage, ratio);
                     multiCrops(i,k,:,:,:) = crop;
                 end
             end
@@ -210,7 +212,7 @@ classdef DataLoader < handle
         end
         
         %% Color jitter augmentation
-        function img = colorJitter(img)
+        function img = colorJitter(obj, img)
             % Random brightness
             brightness = 0.8 + rand * 0.4;
             img = img * brightness;

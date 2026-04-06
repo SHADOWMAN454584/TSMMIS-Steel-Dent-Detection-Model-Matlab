@@ -276,11 +276,14 @@ end
 
 %% Sample few-shot data
 function sampledData = sampleFewShotData(data, numPerClass)
-    classes = unique(arrayfun(@(x) x.class, data));
+    % Extract all class labels from cell array
+    classes = unique(cellfun(@(x) x.class, data));
     sampledData = {};
     
     for c = 1:length(classes)
-        classData = data([data.class] == classes(c));
+        % Filter data for current class
+        classIdx = cellfun(@(x) x.class == classes(c), data);
+        classData = data(classIdx);
         
         if length(classData) >= numPerClass
             idx = randperm(length(classData), numPerClass);
