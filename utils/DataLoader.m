@@ -1,0 +1,275 @@
+%% Data Preparation Module for TSMMIS
+% This module handles:
+%   1. Loading images from folder structure
+%   2. Splitting into unlabeled training, few-shot labeled, and test sets
+%   3. Multicrop generation with augmentations
+%
+% Author: TSMMIS-MATLAB Implementation
+% Date: April 2026
+
+classdef DataLoader < handle
+    properties
+        imageSize = [224, 224];      % Resize target
+        K = 5;                        % Number of crops per image
+        cropRatioRange = [0.1, 1.0];  % Random crop ratio range
+        batchSize = 64;
+    end
+    
+    methods
+        function obj = DataLoader(imageSize, K)
+            if nargin >= 1
+                obj.imageSize = imageSize;
+            end
+            if nargin >= 2
+                obj.K = K;
+            end
+        end
+        
+        %% Load dataset from folder structure
+        % Expected structure:
+        %   rootFolder/
+        %       class1/
+        %           img1.jpg
+        %           img2.jpg
+        %       class2/
+        %           img1.jpg
+        %           ...
+        function [unlabeledData, fewShotData, testData] = loadDataset(obj, rootFolder, trainRatio, fewShotPerClass)
+            % Inputs:
+            %   rootFolder - Root directory containing class subfolders
+            %   trainRatio - Ratio of data for training (0.6 default)
+            %   fewShotPerClass - Number of labeled images per class (1-4)
+            
+            if nargin < 3
+                trainRatio = 0.6;
+            end
+            if nargin < 4
+                fewShotPerClass = 1;
+            end
+            
+            % Get class folders
+            classFolders = dir(rootFolder);
+            classFolders = classFolders([classFolders.isdir]);
+            classNames = {classFolders.name};
+            classNames = classNames(~ismember(classNames, {'.', '..'}));
+            numClasses = length(classNames);
+            
+            fprintf('Found %d classes: %s\n', numClasses, strjoin(classNames, ', '));
+            
+            % Initialize storage
+            unlabeledData = [];
+            fewShotData = [];
+            testData = [];
+            
+            for c = 1:numClasses
+                className = classNames{c};
+                classPath = fullfile(rootFolder, className);
+                
+                % Get all images in class folder
+                imgFiles = dir(fullfile(classPath, '*.*'));
+                imgFiles = imgFiles(arrayfun(@(x) ~isempty(regexp(x.name, '\.(jpg|jpeg|png|bmp)$', 'ignoreCase')), imgFiles));
+                
+                numImages = length(imgFiles);
+                fprintf('Class %s: %d images\n', className, numImages);
+                
+                % Shuffle indices
+                idx = randperm(numImages);
+                
+                % Split: 60% train, 40% test
+                trainCount = floor(numImages * trainRatio);
+                
+                % Training indices
+                trainIdx = idx(1:trainCount);
+                testIdx = idx(trainCount+1:end);
+                
+                % From training set: reserve few-shot samples
+                fewShotCount = min(fewShotPerClass, length(trainIdx));
+                fewShotIdx = trainIdx(1:fewShotCount);
+                unlabeledIdx = trainIdx(fewShotCount+1:end);
+                
+                % Store data
+                for i = 1:length(unlabeledIdx)
+                    imgPath = fullfile(classPath, imgFiles(unlabeledIdx(i)).name);
+                    unlabeledData{end+1} = struct('path', imgPath, 'class', c-1);
+                end
+                
+                for i = 1:length(fewShotIdx)
+                    imgPath = fullfile(classPath, imgFiles(fewShotIdx(i)).name);
+                    fewShotData{end+1} = struct('path', imgPath, 'class', c-1);
+                end
+                
+                for i = 1:length(testIdx)
+                    imgPath = fullfile(classPath, imgFiles(testIdx(i)).name);
+                    testData{end+1} = struct('path', imgPath, 'class', c-1);
+                end
+            end
+            
+            fprintf('Unlabeled: %d, Few-shot labeled: %d, Test: %d\n', ...
+                length(unlabeledData), length(fewShotData), length(testData));
+        end
+        
+        %% Generate multicrops for a batch of images
+        function [mainCrops, multiCrops] = generateMulticrop(obj, images)
+            % Inputs:
+            %   images - NxHxWxC array of images
+            % Outputs:
+            %   mainCrops - NxHxWxC (main view per image)
+            %   multiCrops - NxKxHxWxC (K multi-view crops per image)
+            
+            N = size(images, 1);
+            K = obj.K;
+            
+            % Main view: higher crop ratio (0.8-1.0)
+            mainRatio = 0.8 + rand(N, 1) * 0.2;
+            mainCrops = zeros(N, obj.imageSize(1), obj.imageSize(2), 3);
+            for i = 1:N
+                mainCrops(i,:,:,:) = obj.randomCrop(images(i,:,:,:), mainRatio(i));
+            end
+            
+            % Multi-views: lower crop ratios (0.1-1.0)
+            multiCrops = zeros(N, K, obj.imageSize(1), obj.imageSize(2), 3);
+            for i = 1:N
+                for k = 1:K
+                    ratio = obj.cropRatioRange(1) + rand * (obj.cropRatioRange(2) - obj.cropRatioRange(1));
+                    crop = obj.randomCrop(images(i,:,:,:), ratio);
+                    multiCrops(i,k,:,:,:) = crop;
+                end
+            end
+        end
+        
+        
+        %% Random crop with augmentation
+        function cropped = randomCrop(obj, image, cropRatio)
+            [H, W, C] = size(image);
+            if H < 1 || W < 1
+                cropped = zeros(obj.imageSize(1), obj.imageSize(2), 3);
+                return;
+            end
+            
+            % Calculate crop dimensions
+            cropH = floor(H * cropRatio);
+            cropW = floor(W * cropRatio);
+            
+            % Random position
+            if cropH < H
+                y = randi(H - cropH + 1);
+            else
+                y = 1;
+            end
+            if cropW < W
+                x = randi(W - cropW + 1);
+            else
+                x = 1;
+            end
+            
+            % Crop
+            if cropH < 1, cropH = 1; end
+            if cropW < 1, cropW = 1; end
+            cropped = image(y:y+cropH-1, x:x+cropW-1, :);
+            
+            % Resize to target size
+            cropped = imresize(cropped, obj.imageSize);
+            
+            % Apply augmentations
+            cropped = obj.applyAugmentation(cropped);
+        end
+        
+        %% Apply data augmentation
+        function augmented = applyAugmentation(obj, img)
+            % Random horizontal flip
+            if rand > 0.5
+                img = fliplr(img);
+            end
+            
+            % Random vertical flip
+            if rand > 0.5
+                img = flipud(img);
+            end
+            
+            % Color jitter (brightness, contrast, saturation, hue)
+            if rand > 0.5
+                img = obj.colorJitter(img);
+            end
+            
+            % Random grayscale
+            if rand > 0.8
+                img = rgb2gray(img);
+                img = cat(3, img, img, img);
+            end
+            
+            % Gaussian blur
+            if rand > 0.7
+                kernelSize = randi([3, 7]);
+                if mod(kernelSize, 2) == 0
+                    kernelSize = kernelSize + 1;
+                end
+                img = imgaussfilt(img, rand * 2);
+            end
+            
+            augmented = img;
+        end
+        
+        %% Color jitter augmentation
+        function img = colorJitter(img)
+            % Random brightness
+            brightness = 0.8 + rand * 0.4;
+            img = img * brightness;
+            
+            % Random contrast
+            contrast = 0.8 + rand * 0.4;
+            img = (img - 128) * contrast + 128;
+            
+            % Clip to valid range
+            img = min(max(img, 0), 255);
+        end
+        
+        %% Create mini-batch for training
+        function [batchImages, batchLabels] = createBatch(obj, data, indices)
+            n = length(indices);
+            batchImages = zeros(n, obj.imageSize(1), obj.imageSize(2), 3);
+            
+            for i = 1:n
+                img = imread(data{indices(i)}.path);
+                if size(img, 3) ~= 3
+                    img = cat(3, img, img, img);
+                end
+                img = imresize(img, obj.imageSize);
+                batchImages(i, :, :, :) = img;
+            end
+            
+            batchLabels = zeros(n, 1);
+            for i = 1:n
+                batchLabels(i) = data{indices(i)}.class;
+            end
+        end
+        
+        %% Get random batch from unlabeled data
+        function [batchImages, batchIndices] = getRandomBatch(obj, data)
+            n = length(data);
+            if n < obj.batchSize
+                batchIndices = 1:n;
+            else
+                batchIndices = randi(n, [obj.batchSize, 1]);
+            end
+            [batchImages, ~] = obj.createBatch(data, batchIndices);
+        end
+    end
+end
+
+%% Helper function to prepare dataset
+function prepareNEUCLS(dataPath, outputPath)
+    % Download/Prepare NEU-CLS dataset
+    % This is a placeholder - in practice, download from:
+    % https://github.com/cugbr/NEU-CLS
+    
+    fprintf('Data preparation for NEU-CLS\n');
+    fprintf('Please ensure the following structure:\n');
+    fprintf('%s/\n', dataPath);
+    fprintf('  |-- patches/\n');
+    fprintf('      |-- cra/\n');
+    fprintf('      |-- in/\n');
+    fprintf('      |-- pa/\n');
+    fprintf('      |-- ps/\n');
+    fprintf('      |-- rs/\n');
+    fprintf('      |-- sc/\n');
+end
