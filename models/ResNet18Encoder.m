@@ -122,11 +122,27 @@ classdef ResNet18Encoder < handle
         
         %% Create classification head for fine-tuning
         function net = addClassificationHead(obj, encoderNet, numClasses)
-            % Get the feature layer
-            lgraph = encoderNet.Layers;
+            % Handle both dlnetwork and LayerGraph inputs
+            if isa(encoderNet, 'dlnetwork')
+                % Extract layer graph from dlnetwork
+                lgraph = layerGraph(encoderNet.Layers);
+            else
+                lgraph = encoderNet;
+            end
             
-            % Find the gap layer
-            gapIdx = find(arrayfun(@(x) isa(x, 'nnet.cnn.layer.GlobalAveragePooling2dLayer'), lgraph));
+            % Get all layer names
+            layerNames = {lgraph.Layers.Name};
+            
+            % Find the gap layer index
+            gapIdx = find(strcmp(layerNames, 'gap'));
+            
+            if isempty(gapIdx)
+                error('Global Average Pooling layer "gap" not found in network');
+            end
+            
+            % Build new network up to and including gap layer
+            % Get layers up to gap
+            keepLayers = lgraph.Layers(1:gapIdx);
             
             % Add new classification head
             newLayers = [
@@ -134,8 +150,8 @@ classdef ResNet18Encoder < handle
                 softmaxLayer('Name', 'softmax')
             ];
             
-            % Create new network
-            lgraphNew = layerGraph(lgraph(1:gapIdx));
+            % Create new layer graph from scratch
+            lgraphNew = layerGraph(keepLayers);
             lgraphNew = addLayers(lgraphNew, newLayers);
             lgraphNew = connectLayers(lgraphNew, 'gap', 'classifier_fc');
             

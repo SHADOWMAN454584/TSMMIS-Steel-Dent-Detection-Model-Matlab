@@ -52,64 +52,91 @@ config.savePath = fullfile(pwd, 'models');
 config.resultsPath = fullfile(pwd, 'evaluation', 'results');
 
 %% ===================== STEP 1: DATA PREPARATION =====================
-fprintf('=== STEP 1: Data Preparation ===\n');
-
-% Initialize data loader
-dataLoader = DataLoader(config.imageSize, config.K);
-
-% Load dataset
-if isfolder(config.dataPath)
-    [unlabeledData, fewShotData, testData] = dataLoader.loadDataset(...
-        config.dataPath, config.trainRatio, 1);
-else
-    fprintf('Dataset not found at %s\n', config.dataPath);
-    fprintf('Creating synthetic data for testing...\n');
-    [unlabeledData, fewShotData, testData] = createSyntheticData(config);
-end
-
-fprintf('Data preparation complete!\n');
-fprintf('  Unlabeled: %d\n  Few-shot: %d\n  Test: %d\n', ...
-    length(unlabeledData), length(fewShotData), length(testData));
+% fprintf('=== STEP 1: Data Preparation ===\n');
+% 
+% % Initialize data loader
+% dataLoader = DataLoader(config.imageSize, config.K);
+% 
+% % Load dataset
+% if isfolder(config.dataPath)
+%     [unlabeledData, fewShotData, testData] = dataLoader.loadDataset(...
+%         config.dataPath, config.trainRatio, 1);
+% else
+%     fprintf('Dataset not found at %s\n', config.dataPath);
+%     fprintf('Creating synthetic data for testing...\n');
+%     [unlabeledData, fewShotData, testData] = createSyntheticData(config);
+% end
+% 
+% fprintf('Data preparation complete!\n');
+% fprintf('  Unlabeled: %d\n  Few-shot: %d\n  Test: %d\n', ...
+%     length(unlabeledData), length(fewShotData), length(testData));
 
 %% ===================== STEP 2: MODEL INITIALIZATION =====================
-fprintf('\n=== STEP 2: Model Initialization ===\n');
-
-% Create encoder
-encoder = ResNet18Encoder(config.numClasses);
-net = encoder.createEncoderWithPredictor();
-
-fprintf('Network created: ResNet18 with predictor MLP\n');
-fprintf('Feature dimension: %d\n', config.featureDim);
+% fprintf('\n=== STEP 2: Model Initialization ===\n');
+% 
+% % Create encoder
+% encoder = ResNet18Encoder(config.numClasses);
+% net = encoder.createEncoderWithPredictor();
+% 
+% fprintf('Network created: ResNet18 with predictor MLP\n');
+% fprintf('Feature dimension: %d\n', config.featureDim);
 
 %% ===================== STEP 3: PRETRAINING =====================
-fprintf('\n=== STEP 3: Self-Supervised Pretraining ===\n');
-
-% Training options
-trainOpts = struct();
-trainOpts.learningRate = config.pretrain.learningRate;
-trainOpts.momentum = config.pretrain.momentum;
-trainOpts.weightDecay = config.pretrain.weightDecay;
-trainOpts.epochs = config.pretrain.epochs;
-trainOpts.batchSize = config.pretrain.batchSize;
-trainOpts.K = config.K;
-trainOpts.lambda = config.pretrain.lambda;
-trainOpts.temperature = config.pretrain.temperature;
-
-% Train model
-fprintf('Starting pretraining for %d epochs...\n', config.pretrain.epochs);
-fprintf('Batch size: %d, Learning rate: %.4f\n', config.pretrain.batchSize, config.pretrain.learningRate);
-
-% Note: This is a simplified training loop
-% For full implementation, use GPU training with dlarray
-[net, trainInfo] = pretrainModel(net, dataLoader, unlabeledData, trainOpts);
-
-% Save pretrained model
-modelPath = fullfile(config.savePath, 'pretrained_encoder.mat');
-save(modelPath, 'net', 'trainInfo');
-fprintf('Model saved to %s\n', modelPath);
+% fprintf('\n=== STEP 3: Self-Supervised Pretraining ===\n');
+% 
+% % Training options
+% trainOpts = struct();
+% trainOpts.learningRate = config.pretrain.learningRate;
+% trainOpts.momentum = config.pretrain.momentum;
+% trainOpts.weightDecay = config.pretrain.weightDecay;
+% trainOpts.epochs = config.pretrain.epochs;
+% trainOpts.batchSize = config.pretrain.batchSize;
+% trainOpts.K = config.K;
+% trainOpts.lambda = config.pretrain.lambda;
+% trainOpts.temperature = config.pretrain.temperature;
+% 
+% % Train model
+% fprintf('Starting pretraining for %d epochs...\n', config.pretrain.epochs);
+% fprintf('Batch size: %d, Learning rate: %.4f\n', config.pretrain.batchSize, config.pretrain.learningRate);
+% 
+% % Note: This is a simplified training loop
+% % For full implementation, use GPU training with dlarray
+% [net, trainInfo] = pretrainModel(net, dataLoader, unlabeledData, trainOpts);
+% 
+% % Save pretrained model
+% modelPath = fullfile(config.savePath, 'pretrained_encoder.mat');
+% save(modelPath, 'net', 'trainInfo');
+% fprintf('Model saved to %s\n', modelPath);
 
 %% ===================== STEP 4: FINE-TUNING =====================
 fprintf('\n=== STEP 4: Few-Shot Fine-Tuning ===\n');
+
+% Load pretrained model
+modelPath = fullfile(config.savePath, 'pretrained_encoder.mat');
+if isfile(modelPath)
+    load(modelPath, 'net');
+    fprintf('Loaded pretrained model from %s\n', modelPath);
+else
+    error('Pretrained model not found at %s. Run Step 3 first.', modelPath);
+end
+
+% Load or create data if not already loaded
+if ~exist('fewShotData', 'var') || ~exist('testData', 'var')
+    fprintf('Loading dataset...\n');
+    dataLoader = DataLoader(config.imageSize, config.K);
+    
+    if isfolder(config.dataPath)
+        [~, fewShotData, testData] = dataLoader.loadDataset(...
+            config.dataPath, config.trainRatio, 1);
+    else
+        fprintf('Dataset not found at %s\n', config.dataPath);
+        fprintf('Creating synthetic data for testing...\n');
+        [~, fewShotData, testData] = createSyntheticData(config);
+    end
+    
+    fprintf('Data loaded: Few-shot: %d, Test: %d\n', ...
+        length(fewShotData), length(testData));
+end
 
 % Initialize fine-tuner
 fineTuner = FineTuner(net, config.numClasses);
@@ -302,12 +329,9 @@ function net_ft = fineTuneModel(pretrainedNet, fewShotData, testData, config)
     encoder = ResNet18Encoder(config.numClasses);
     net_ft = encoder.addClassificationHead(pretrainedNet, config.numClasses);
     
-    % Freeze backbone (linear evaluation mode)
-    for i = 1:numel(net_ft.Layers)
-        if ~contains(net_ft.Layers(i).Name, 'classifier')
-            net_ft.Layers(i).Trainable = false;
-        end
-    end
+    % For dlnetwork, we freeze layers by specifying learnables during training
+    % For this simplified version, just return the network
+    % In full implementation, use trainingOptions with 'FrozenLayers' parameter
     
     % For simplified evaluation, return network
 end
@@ -328,19 +352,26 @@ function features = extractAllFeatures(net, data)
     for i = 1:batchSize:numSamples
         idx = i:min(i+batchSize-1, numSamples);
         
-        batchImages = zeros(length(idx), 224, 224, 3);
+        batchImages = zeros(224, 224, 3, length(idx));
         for j = 1:length(idx)
             img = imread(data{idx(j)}.path);
             if size(img, 3) ~= 3
                 img = cat(3, img, img, img);
             end
             img = imresize(img, [224, 224]);
-            batchImages(j, :, :, :) = img;
+            batchImages(:, :, :, j) = img;
         end
         
         % Extract features
         dlX = dlarray(single(batchImages), 'SSCB');
         feats = predict(net, dlX);
-        features(idx, :) = extractdata(feats);
+        featsData = extractdata(feats);
+        
+        % Transpose if necessary to match expected dimensions
+        if size(featsData, 1) == 512 && size(featsData, 2) == length(idx)
+            featsData = featsData';
+        end
+        
+        features(idx, :) = featsData;
     end
 end
