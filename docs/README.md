@@ -154,7 +154,7 @@ The script will:
 **Purpose:** Handle data loading, splitting, and multicrop generation
 
 **Key Methods:**
-- `loadDataset(rootFolder, trainRatio, fewShotPerClass)` - Load and split data
+- `loadDataset(rootFolder, trainRatio, fewShotPerClass)` - Load and split data; optional 4th output returns full training pool per class
 - `generateMulticrop(images)` - Generate K=5 crops per image
 - `applyAugmentation(img)` - Apply random flip, color jitter, blur
 
@@ -287,30 +287,31 @@ main_TSMMIS
 **Step 1: Data Loading**
 ```matlab
 dataLoader = DataLoader([224, 224], 5);
-[unlabeled, fewShot, test] = dataLoader.loadDataset(dataPath, 0.6, 1);
+[unlabeled, fewShot, test, trainPool] = dataLoader.loadDataset(dataPath, 0.6, 4);
 ```
 
 **Step 2: Model Creation**
 ```matlab
-encoder = ResNet18Encoder(6);
-net = encoder.createEncoderWithPredictor();
+[net, modelInfo] = initializeEncoder(config);  % Uses pretrained resnet18 when available
 ```
 
 **Step 3: Pretraining**
 ```matlab
 opts = struct('epochs', 300, 'batchSize', 64, 'learningRate', 0.003);
-[net, info] = pretrainModel(net, dataLoader, unlabeled, opts);
+[net, info] = pretrainModel(net, unlabeled, opts);  % Unlabeled feature pretraining
 ```
 
 **Step 4: Fine-tuning**
 ```matlab
-fineTuner = FineTuner(net, 6);
-[net_ft, accuracy] = fineTuner.linearEvaluation(fewShot, test, 100);
+poolFeatures = applyFeatureTransform(net, extractAllFeatures(net, trainPool));
+testFeatures = applyFeatureTransform(net, extractAllFeatures(net, test));
+classifier = trainPrototypeClassifier(poolFeatures(sampleIdx, :), poolLabels(sampleIdx), 6);
+pred = predictPrototypeClassifier(classifier, testFeatures);
 ```
 
 **Step 5: Evaluation**
 ```matlab
-acc = evaluateModel(net_ft, test);
+acc = mean(pred == testLabels);
 fprintf('Accuracy: %.2f%%\n', acc * 100);
 ```
 
@@ -368,14 +369,15 @@ results =
   - Verify data augmentation
 
 ### GPU Training
-To enable GPU acceleration:
+`main_TSMMIS.m` auto-detects CUDA GPU and uses GPU execution for feature extraction when available:
 ```matlab
-% Check GPU availability
-gpu = gpuDevice;
-fprintf('Using GPU: %s\n', gpu.Name);
-
-% Ensure data is on GPU
-dlX = dlarray(single(images), 'SSCB');
+if canUseGPU
+    gpuInfo = gpuDevice;
+    fprintf('Detected GPU: %s\n', gpuInfo.Name);
+    config.executionEnvironment = 'gpu';
+else
+    config.executionEnvironment = 'cpu';
+end
 ```
 
 ---

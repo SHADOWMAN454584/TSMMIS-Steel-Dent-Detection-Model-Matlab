@@ -186,7 +186,7 @@ end
 %% t-SNE visualization
 function tsneVisualization(features, labels, savePath)
     if ~isempty(features) && size(features, 1) > 1
-        figure;
+        fig = figure('Visible', 'off');
         if exist('tsne', 'file')
             Y = tsne(features, 'NumDimensions', 2);
             gscatter(Y(:, 1), Y(:, 2), labels);
@@ -197,16 +197,21 @@ function tsneVisualization(features, labels, savePath)
         title('t-SNE Visualization of Learned Features');
         xlabel('Dimension 1');
         ylabel('Dimension 2');
+        drawnow;
         
         if nargin >= 3 && ~isempty(savePath)
-            saveas(gcf, savePath);
+            safeExportFigure(fig, savePath);
+        end
+        
+        if isgraphics(fig)
+            close(fig);
         end
     end
 end
 
 %% Generate training progress plot
 function plotTrainingProgress(info, savePath)
-    figure;
+    fig = figure('Visible', 'off');
     
     subplot(1, 3, 1);
     plot(info.epoch, info.loss);
@@ -225,9 +230,34 @@ function plotTrainingProgress(info, savePath)
     title('MMIS Loss (L_MMIS)');
     xlabel('Epoch');
     ylabel('Loss');
+    drawnow;
     
     if nargin >= 2 && ~isempty(savePath)
-        saveas(gcf, savePath);
+        safeExportFigure(fig, savePath);
+    end
+    
+    if isgraphics(fig)
+        close(fig);
+    end
+end
+
+function safeExportFigure(figHandle, savePath)
+    if ~isgraphics(figHandle)
+        return;
+    end
+    
+    if ~feature('ShowFigureWindows')
+        return;
+    end
+    
+    try
+        if exist('exportgraphics', 'file') == 2
+            exportgraphics(figHandle, savePath, 'Resolution', 300);
+        else
+            saveas(figHandle, savePath);
+        end
+    catch ME
+        warning('Visualization export failed: %s', ME.message);
     end
 end
 

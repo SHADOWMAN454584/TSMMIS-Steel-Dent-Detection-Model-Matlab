@@ -34,7 +34,7 @@ classdef DataLoader < handle
         %       class2/
         %           img1.jpg
         %           ...
-        function [unlabeledData, fewShotData, testData] = loadDataset(obj, rootFolder, trainRatio, fewShotPerClass)
+        function [unlabeledData, fewShotData, testData, trainPoolData] = loadDataset(obj, rootFolder, trainRatio, fewShotPerClass)
             % Inputs:
             %   rootFolder - Root directory containing class subfolders
             %   trainRatio - Ratio of data for training (0.6 default)
@@ -57,9 +57,10 @@ classdef DataLoader < handle
             fprintf('Found %d classes: %s\n', numClasses, strjoin(classNames, ', '));
             
             % Initialize storage
-            unlabeledData = [];
-            fewShotData = [];
-            testData = [];
+            unlabeledData = {};
+            fewShotData = {};
+            testData = {};
+            trainPoolData = {};
             
             for c = 1:numClasses
                 className = classNames{c};
@@ -81,6 +82,12 @@ classdef DataLoader < handle
                 % Training indices
                 trainIdx = idx(1:trainCount);
                 testIdx = idx(trainCount+1:end);
+                
+                % Store full training pool (used for few-shot sampling runs)
+                for i = 1:length(trainIdx)
+                    imgPath = fullfile(classPath, imgFiles(trainIdx(i)).name);
+                    trainPoolData{end+1} = struct('path', imgPath, 'class', c-1);
+                end
                 
                 % From training set: reserve few-shot samples
                 fewShotCount = min(fewShotPerClass, length(trainIdx));
