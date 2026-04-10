@@ -52,61 +52,61 @@ config.savePath = fullfile(pwd, 'models');
 config.resultsPath = fullfile(pwd, 'evaluation', 'results');
 
 %% ===================== STEP 1: DATA PREPARATION =====================
-% fprintf('=== STEP 1: Data Preparation ===\n');
-% 
-% % Initialize data loader
-% dataLoader = DataLoader(config.imageSize, config.K);
-% 
-% % Load dataset
-% if isfolder(config.dataPath)
-%     [unlabeledData, fewShotData, testData] = dataLoader.loadDataset(...
-%         config.dataPath, config.trainRatio, 1);
-% else
-%     fprintf('Dataset not found at %s\n', config.dataPath);
-%     fprintf('Creating synthetic data for testing...\n');
-%     [unlabeledData, fewShotData, testData] = createSyntheticData(config);
-% end
-% 
-% fprintf('Data preparation complete!\n');
-% fprintf('  Unlabeled: %d\n  Few-shot: %d\n  Test: %d\n', ...
-%     length(unlabeledData), length(fewShotData), length(testData));
+fprintf('=== STEP 1: Data Preparation ===\n');
+
+% Initialize data loader
+dataLoader = DataLoader(config.imageSize, config.K);
+
+% Load dataset
+if isfolder(config.dataPath)
+    [unlabeledData, fewShotData, testData] = dataLoader.loadDataset(...
+        config.dataPath, config.trainRatio, 1);
+else
+    fprintf('Dataset not found at %s\n', config.dataPath);
+    fprintf('Creating synthetic data for testing...\n');
+    [unlabeledData, fewShotData, testData] = createSyntheticData(config);
+end
+
+fprintf('Data preparation complete!\n');
+fprintf('  Unlabeled: %d\n  Few-shot: %d\n  Test: %d\n', ...
+    length(unlabeledData), length(fewShotData), length(testData));
 
 %% ===================== STEP 2: MODEL INITIALIZATION =====================
-% fprintf('\n=== STEP 2: Model Initialization ===\n');
-% 
-% % Create encoder
-% encoder = ResNet18Encoder(config.numClasses);
-% net = encoder.createEncoderWithPredictor();
-% 
-% fprintf('Network created: ResNet18 with predictor MLP\n');
-% fprintf('Feature dimension: %d\n', config.featureDim);
+fprintf('\n=== STEP 2: Model Initialization ===\n');
+
+% Create encoder
+encoder = ResNet18Encoder(config.numClasses);
+net = encoder.createEncoderWithPredictor();
+
+fprintf('Network created: ResNet18 with predictor MLP\n');
+fprintf('Feature dimension: %d\n', config.featureDim);
 
 %% ===================== STEP 3: PRETRAINING =====================
-% fprintf('\n=== STEP 3: Self-Supervised Pretraining ===\n');
-% 
-% % Training options
-% trainOpts = struct();
-% trainOpts.learningRate = config.pretrain.learningRate;
-% trainOpts.momentum = config.pretrain.momentum;
-% trainOpts.weightDecay = config.pretrain.weightDecay;
-% trainOpts.epochs = config.pretrain.epochs;
-% trainOpts.batchSize = config.pretrain.batchSize;
-% trainOpts.K = config.K;
-% trainOpts.lambda = config.pretrain.lambda;
-% trainOpts.temperature = config.pretrain.temperature;
-% 
-% % Train model
-% fprintf('Starting pretraining for %d epochs...\n', config.pretrain.epochs);
-% fprintf('Batch size: %d, Learning rate: %.4f\n', config.pretrain.batchSize, config.pretrain.learningRate);
-% 
-% % Note: This is a simplified training loop
-% % For full implementation, use GPU training with dlarray
-% [net, trainInfo] = pretrainModel(net, dataLoader, unlabeledData, trainOpts);
-% 
-% % Save pretrained model
-% modelPath = fullfile(config.savePath, 'pretrained_encoder.mat');
-% save(modelPath, 'net', 'trainInfo');
-% fprintf('Model saved to %s\n', modelPath);
+fprintf('\n=== STEP 3: Self-Supervised Pretraining ===\n');
+
+% Training options
+trainOpts = struct();
+trainOpts.learningRate = config.pretrain.learningRate;
+trainOpts.momentum = config.pretrain.momentum;
+trainOpts.weightDecay = config.pretrain.weightDecay;
+trainOpts.epochs = config.pretrain.epochs;
+trainOpts.batchSize = config.pretrain.batchSize;
+trainOpts.K = config.K;
+trainOpts.lambda = config.pretrain.lambda;
+trainOpts.temperature = config.pretrain.temperature;
+
+% Train model
+fprintf('Starting pretraining for %d epochs...\n', config.pretrain.epochs);
+fprintf('Batch size: %d, Learning rate: %.4f\n', config.pretrain.batchSize, config.pretrain.learningRate);
+
+% Note: This is a simplified training loop
+% For full implementation, use GPU training with dlarray
+[net, trainInfo] = pretrainModel(net, dataLoader, unlabeledData, trainOpts);
+
+% Save pretrained model
+modelPath = fullfile(config.savePath, 'pretrained_encoder.mat');
+save(modelPath, 'net', 'trainInfo');
+fprintf('Model saved to %s\n', modelPath);
 
 %% ===================== STEP 4: FINE-TUNING =====================
 fprintf('\n=== STEP 4: Few-Shot Fine-Tuning ===\n');
@@ -147,9 +147,6 @@ for lc = 1:length(config.finetune.labelCounts)
     numLabels = config.finetune.labelCounts(lc);
     fprintf('\nEvaluating with %d label(s) per class...\n', numLabels);
     
-    % Sample few-shot data
-    sampledFewShot = sampleFewShotData(fewShotData, numLabels);
-    
     % Run multiple experiments
     accuracies = zeros(config.finetune.numRuns, 1);
     
@@ -157,9 +154,30 @@ for lc = 1:length(config.finetune.labelCounts)
         % Random sample
         runFewShot = sampleFewShotData(fewShotData, numLabels);
         
-        % Fine-tune and evaluate
-        net_ft = fineTuneModel(net, runFewShot, testData, config);
-        acc = evaluateModel(net_ft, testData);
+        % Extract features for training and testing
+        featuresTrain = extractAllFeatures(net, runFewShot);
+        featuresTest = extractAllFeatures(net, testData);
+        
+        % Get labels
+        labelsTrain = zeros(length(runFewShot), 1);
+        for i = 1:length(runFewShot)
+            labelsTrain(i) = runFewShot{i}.class;
+        end
+        
+        labelsTest = zeros(length(testData), 1);
+        for i = 1:length(testData)
+            labelsTest(i) = testData{i}.class;
+        end
+        
+        % Train linear classifier
+        t = templateLinear('Learner', 'logistic');
+        classifier = fitcecoc(featuresTrain, labelsTrain, ...
+            'Learners', t, ...
+            'FitPosterior', true);
+        
+        % Predict and compute accuracy
+        predictions = predict(classifier, featuresTest);
+        acc = sum(predictions == labelsTest) / length(labelsTest);
         accuracies(run) = acc;
     end
     
@@ -338,9 +356,21 @@ end
 
 %% Evaluate model
 function accuracy = evaluateModel(net, testData)
-    % Simplified evaluation
-    % Random accuracy for testing
-    accuracy = 0.25 + rand() * 0.1;
+    % Real evaluation using extracted features and classifier
+    
+    % Extract features for test data
+    features = extractAllFeatures(net, testData);
+    
+    % Get true labels
+    trueLabels = zeros(length(testData), 1);
+    for i = 1:length(testData)
+        trueLabels(i) = testData{i}.class;
+    end
+    
+    % For evaluation, we need to train a classifier on few-shot data
+    % This function should be called after fine-tuning with actual labels
+    % For now, return a placeholder that indicates this needs few-shot data
+    accuracy = 0;
 end
 
 %% Extract all features

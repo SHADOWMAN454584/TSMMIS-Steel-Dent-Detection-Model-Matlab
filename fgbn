@@ -1,0 +1,104 @@
+=== STEP 1: Data Preparation ===
+Found 6 classes: cra, in, pa, ps, rs, sc
+Class cra: 240 images
+Class in: 240 images
+Class pa: 240 images
+Class ps: 240 images
+Class rs: 240 images
+Class sc: 240 images
+Unlabeled: 858, Few-shot labeled: 6, Test: 576
+Data preparation complete!
+  Unlabeled: 858
+  Few-shot: 6
+  Test: 576
+
+=== STEP 2: Model Initialization ===
+Network created: ResNet18 with predictor MLP
+Feature dimension: 512
+
+=== STEP 3: Self-Supervised Pretraining ===
+Starting pretraining for 300 epochs...
+Batch size: 64, Learning rate: 0.0030
+Epoch [10/300], Loss: 0.0493
+Epoch [20/300], Loss: 0.0553
+Epoch [30/300], Loss: 0.0446
+Epoch [40/300], Loss: 0.0576
+Epoch [50/300], Loss: 0.0641
+Epoch [60/300], Loss: 0.0588
+Epoch [70/300], Loss: 0.0450
+Epoch [80/300], Loss: 0.0443
+Epoch [90/300], Loss: 0.0517
+Epoch [100/300], Loss: 0.0557
+Epoch [110/300], Loss: 0.0377
+Epoch [120/300], Loss: 0.0523
+Epoch [130/300], Loss: 0.0473
+Epoch [140/300], Loss: 0.0553
+Epoch [150/300], Loss: 0.0498
+Epoch [160/300], Loss: 0.0426
+Epoch [170/300], Loss: 0.0494
+Epoch [180/300], Loss: 0.0643
+Epoch [190/300], Loss: 0.0546
+Epoch [200/300], Loss: 0.0433
+Epoch [210/300], Loss: 0.0399
+Epoch [220/300], Loss: 0.0569
+Epoch [230/300], Loss: 0.0556
+Epoch [240/300], Loss: 0.0373
+Epoch [250/300], Loss: 0.0474
+Epoch [260/300], Loss: 0.0421
+Epoch [270/300], Loss: 0.0562
+Epoch [280/300], Loss: 0.0522
+Epoch [290/300], Loss: 0.0523
+Epoch [300/300], Loss: 0.0429
+Model saved to D:\MVRP_Project\TSMMIS_MATLAB\models\pretrained_encoder.mat
+
+=== STEP 4: Few-Shot Fine-Tuning ===
+Loaded pretrained model from D:\MVRP_Project\TSMMIS_MATLAB\models\pretrained_encoder.mat
+
+Evaluating with 1 label(s) per class...
+Starting parallel pool (parpool) using the 'Processes' profile ...
+Connected to parallel pool with 4 workers.
+  Accuracy: 16.67 +/- 0.00%
+
+Evaluating with 2 label(s) per class...
+  Accuracy: 16.67 +/- 0.00%
+
+Evaluating with 3 label(s) per class...
+  Accuracy: 16.67 +/- 0.00%
+
+Evaluating with 4 label(s) per class...
+  Accuracy: 16.67 +/- 0.00%
+
+=== STEP 5: Evaluation Results ===
+
+Configuration        | Mean Accuracy   | Std Dev        
+-------------------------------------------------------
+labels_1             | 16.67         % | 0.00          %
+labels_2             | 16.67         % | 0.00          %
+labels_3             | 16.67         % | 0.00          %
+labels_4             | 16.67         % | 0.00          %
+
+=== STEP 6: Feature Visualization ===
+Extracting features for t-SNE visualization...
+Warning: Graphics timeout occurred. To share details of this issue with MathWorks technical support, please include that this is a graphics
+handshaking issue with your service request. 
+> In print (line 31)
+In saveas (line 181)
+In main_TSMMIS (line 224) 
+Error using checkArgsForHandleToPrint
+Invalid graphics object.
+
+Error in checkArgsForHandleToPrint
+
+Error in print>LocalCreatePrintJob (line 104)
+handles = checkArgsForHandleToPrint(0, varargin{:});
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error in print (line 33)
+[pj, inputargs] = LocalCreatePrintJob(varargin{:});
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error in saveas (line 181)
+        print( h, name, ['-d' dev{i}] )
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error in main_TSMMIS (line 224)
+saveas(gcf, figPath);
+^^^^^^^^^^^^^^^^^^^^
+ 
