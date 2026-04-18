@@ -198,7 +198,11 @@ if exist('tsne', 'file') == 2 && size(tsneInput, 1) > 2
     tsnePlot = tsne(tsneInput, 'NumDimensions', 2, 'Perplexity', 30, 'Standardize', true);
 else
     [~, score] = pca(tsneInput);
-    tsnePlot = score(:, 1:2);
+    if size(score, 2) >= 2
+        tsnePlot = score(:, 1:2);
+    else
+        tsnePlot = [score(:, 1), zeros(size(score, 1), 1)];
+    end
 end
 
 tsneDataPath = fullfile(config.resultsPath, 'tsne_embedding.mat');
@@ -309,7 +313,18 @@ function [encoderModel, info] = pretrainModel(encoderModel, unlabeledData, opts)
     features = normalizeRows(features);
     
     pcaDim = min(opts.pcaDim, size(features, 2));
-    [coeff, score, ~, ~, explained, mu] = pca(features, 'NumComponents', pcaDim);
+    mu = mean(double(features), 1);
+    centeredFeatures = bsxfun(@minus, double(features), mu);
+    [coeff, score, latent] = pca(centeredFeatures, ...
+        'NumComponents', pcaDim, ...
+        'Centered', false);
+    
+    totalVariance = sum(var(centeredFeatures, 0, 1));
+    if ~isfinite(totalVariance) || totalVariance <= eps
+        explained = zeros(size(latent));
+    else
+        explained = 100 * (latent ./ totalVariance);
+    end
     score = normalizeRows(score);
     
     [~, centers] = kmeans(score, opts.numClasses, ...
@@ -525,33 +540,144 @@ function [didSave, message] = saveTsneFigure(tsnePlot, labels, figPath)
     didSave = false;
     message = '';
     
-    if ~feature('ShowFigureWindows')
-        message = 'Figure windows are disabled in this MATLAB session.';
+    if isempty(tsnePlot) || size(tsnePlot, 2) < 2
+        message = 'No 2-D embedding available to export.';
         return;
     end
     
     fig = [];
     try
-        fig = figure('Visible', 'off');
-        ax = axes(fig);
-        gscatter(ax, tsnePlot(:, 1), tsnePlot(:, 2), labels);
-        title(ax, 't-SNE Visualization of Learned Features');
-        xlabel(ax, 'Dimension 1');
-        ylabel(ax, 'Dimension 2');
-        drawnow;
-        
-        if exist('exportgraphics', 'file') == 2
-            exportgraphics(ax, figPath, 'Resolution', 300);
-        else
-            saveas(fig, figPath);
+        if feature('ShowFigureWindows') && usejava('awt') && exist('exportgraphics', 'file') == 2
+            fig = figure('Visible', 'off', 'Renderer', 'painters');
+            ax = axes(fig);
+            gscatter(ax, tsnePlot(:, 1), tsnePlot(:, 2), labels);
+            title(ax, 't-SNE Visualization of Learned Features');
+            xlabel(ax, 'Dimension 1');
+            ylabel(ax, 'Dimension 2');
+            
+            [didSave, message] = exportFigureWithWarningsAsErrors(ax, figPath);
         end
         
-        didSave = true;
+        if ~didSave
+            [didSave, fallbackMessage] = saveTsneRasterFallback(tsnePlot, labels, figPath);
+            if didSave
+                if isempty(message)
+                    message = 'Saved with non-graphics fallback renderer.';
+                else
+                    message = sprintf('%s Fallback renderer used.', message);
+                end
+            elseif isempty(message)
+                message = fallbackMessage;
+            else
+                message = sprintf('%s Fallback failed: %s', message, fallbackMessage);
+            end
+        end
     catch ME
-        message = ME.message;
+        [didSave, fallbackMessage] = saveTsneRasterFallback(tsnePlot, labels, figPath);
+        if didSave
+            message = sprintf('Graphics export failed (%s). Fallback renderer used.', ME.message);
+        else
+            message = sprintf('Graphics export failed (%s). Fallback failed: %s', ME.message, fallbackMessage);
+        end
     end
     
     if ~isempty(fig) && isgraphics(fig)
         close(fig);
+    end
+end
+
+function [didSave, message] = exportFigureWithWarningsAsErrors(axHandle, figPath)
+    didSave = false;
+    message = '';
+    
+    warningState = warning;
+    warningCleanup = onCleanup(@() warning(warningState));
+    warning('error', 'all');
+    
+    try
+        exportgraphics(axHandle, figPath, 'Resolution', 300);
+        didSave = true;
+    catch ME
+        message = ME.message;
+    end
+end
+
+function [didSave, message] = saveTsneRasterFallback(tsnePlot, labels, figPath)
+    didSave = false;
+    message = '';
+    
+    try
+        labelValues = labels(:);
+        if iscell(labelValues)
+            labelValues = string(labelValues);
+        end
+        [~, ~, labelIdx] = unique(labelValues, 'stable');
+        
+        validMask = all(isfinite(tsnePlot(:, 1:2)), 2);
+        if ~any(validMask)
+            message = 'Embedding contains no finite points.';
+            return;
+        end
+        
+        points = tsnePlot(validMask, 1:2);
+        labelIdx = labelIdx(validMask);
+        
+        colors = lines(max(labelIdx));
+        canvasHeight = 900;
+        canvasWidth = 1200;
+        margin = 60;
+        
+        img = uint8(255 * ones(canvasHeight, canvasWidth, 3));
+        
+        plotHeight = canvasHeight - 2 * margin;
+        plotWidth = canvasWidth - 2 * margin;
+        
+        minX = min(points(:, 1));
+        maxX = max(points(:, 1));
+        minY = min(points(:, 2));
+        maxY = max(points(:, 2));
+        
+        xRange = max(maxX - minX, eps);
+        yRange = max(maxY - minY, eps);
+        
+        xNorm = (points(:, 1) - minX) ./ xRange;
+        yNorm = (points(:, 2) - minY) ./ yRange;
+        
+        colPixels = margin + 1 + round(xNorm * (plotWidth - 1));
+        rowPixels = margin + 1 + round((1 - yNorm) * (plotHeight - 1));
+        
+        markerRadius = 4;
+        for i = 1:numel(rowPixels)
+            color = uint8(round(255 * colors(labelIdx(i), :)));
+            img = drawFilledDisk(img, rowPixels(i), colPixels(i), markerRadius, color);
+        end
+        
+        top = margin + 1;
+        bottom = margin + plotHeight;
+        left = margin + 1;
+        right = margin + plotWidth;
+        img(top:bottom, [left, right], :) = 0;
+        img([top, bottom], left:right, :) = 0;
+        
+        imwrite(img, figPath);
+        didSave = true;
+    catch ME
+        message = ME.message;
+    end
+end
+
+function img = drawFilledDisk(img, centerRow, centerCol, radius, color)
+    rowMin = max(1, centerRow - radius);
+    rowMax = min(size(img, 1), centerRow + radius);
+    colMin = max(1, centerCol - radius);
+    colMax = min(size(img, 2), centerCol + radius);
+    
+    [colGrid, rowGrid] = meshgrid(colMin:colMax, rowMin:rowMax);
+    mask = (rowGrid - centerRow).^2 + (colGrid - centerCol).^2 <= radius^2;
+    
+    for channel = 1:3
+        patch = img(rowMin:rowMax, colMin:colMax, channel);
+        patch(mask) = color(channel);
+        img(rowMin:rowMax, colMin:colMax, channel) = patch;
     end
 end
